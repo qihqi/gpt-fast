@@ -4,19 +4,18 @@ from model import Transformer, ModelArgs, transformer_configs
 
 
 def benchmark_torch_function(iters, f):
-    f()
-    torch.cuda.synchronize()
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
-    start_event.record()
     for i in range(iters):
+        torch.cuda.synchronize()
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
         f()
-    end_event.record()
-    torch.cuda.synchronize()
-    return (start_event.elapsed_time(end_event) * 1.0e-3) / iters
+        end_event.record()
+        torch.cuda.synchronize()
+        print(i, start_event.elapsed_time(end_event) * 1.0e-3)
 
 
-def main():
+def main(inductor=False):
     with torch.device('cuda'):
         model_args = ModelArgs(**transformer_configs['7B'])
         m = Transformer(model_args)
@@ -27,10 +26,12 @@ def main():
             torch.randint(0, 32000, (1, 2048)),
             torch.arange(0, 2048),
         )
+        if inductor:
+            m = torch.compile(m, mode="reduce-overhead", fullgraph=True)
         def f():
             m(*sample_args)
 
-        print(benchmark_torch_function(1, f))
+        benchmark_torch_function(2, f)
 
 
 from torch.utils._pytree import tree_map
@@ -92,7 +93,9 @@ def main2(jit=True):
 
 if __name__ == '__main__':
     if sys.argv[1] == 'torch':
-        main()
+        main(False)
+    if sys.argv[1] == 'torch_inductor':
+        main(True)
     elif sys.argv[1] == 'jax':
         main2(False)
     elif sys.argv[1] == 'jax_jit':
