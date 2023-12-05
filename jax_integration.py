@@ -309,13 +309,16 @@ import torch
 import torch.utils.dlpack as torchdl
 from jax import dlpack as jaxdl
 
+device = jax.devices()[0]
+
 def t2j(t):
     if isinstance(t, JaxTensor):
         return t._elem
     if t.dtype == torch.bool:
         t = t.to(torch.int32)
     dl = torchdl.to_dlpack(t)
-    return jaxdl.from_dlpack(dl)
+    res = jaxdl.from_dlpack(dl)
+    return jax.device_put(res, device=device)
 
 def move_to_device(t):
     return JaxTensor(t2j(t))
@@ -494,11 +497,12 @@ def make_jax_loop(model_arg, model_prefill, model_decode):
 
 class JaxJitted:
 
-    def __init__(self, m):
+    def __init__(self, m, set_weights=True):
         self._m = m
         m_func, _weight, _buffer = make_functional_with_buffers(m)
-        self._weight = [x._elem for x in _weight]
-        self._buffer = [x._elem for x in _buffer]
+        if set_weights:
+            self._weight = [x._elem for x in _weight]
+            self._buffer = [x._elem for x in _buffer]
 
 
         def m_func_jax(weights, buffers, args):
@@ -516,3 +520,7 @@ class JaxJitted:
         args = [x._elem for x in args]
         res = self._jitted(self._weight, self._buffer, args)
         return JaxTensor(res)
+
+    def set_weights(self, weights, buffer):
+        self._weight = [x._elem for x in weights]
+        self._buffer = [x._elem for x in buffer]
